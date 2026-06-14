@@ -1,7 +1,6 @@
 """Tests for the exchange-rate tool."""
 
 import httpx
-import pytest
 from pytest_httpx import HTTPXMock
 
 from claude_forex_agent.tools.rates import get_exchange_rate
