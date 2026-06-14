@@ -15,9 +15,10 @@ class ForexAgent:
         self.client = client
         self.tools = tools
         self.model = "claude-sonnet-4-6"
+        self.history: list[dict] = []
 
     def run(self, user_message: str) -> str:
-        messages: list[dict] = [{"role": "user", "content": user_message}]
+        messages = self.history + [{"role": "user", "content": user_message}]
 
         while True:
             response = self.client.messages.create(
@@ -29,13 +30,15 @@ class ForexAgent:
             )
 
             if response.stop_reason == "end_turn":
-                return next(
-                    block.text
-                    for block in response.content
-                    if block.type == "text"
+                reply = next(
+                    block.text for block in response.content if block.type == "text"
                 )
+                # Persist the full exchange (including any tool turns) to history
+                messages.append({"role": "assistant", "content": response.content})
+                self.history = messages
+                return reply
 
-            # Process tool calls
+            # Dispatch tool calls and loop
             tool_results = []
             for block in response.content:
                 if block.type == "tool_use":
@@ -49,8 +52,12 @@ class ForexAgent:
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": tool_results})
 
+    def reset(self) -> None:
+        self.history = []
+
     def _dispatch_tool(self, name: str, inputs: dict) -> dict:
-        from claude_forex_agent.tools import registry
+        from claude_forex_agent.tools.registry import registry
+
         handler = registry.get(name)
         if handler is None:
             return {"error": f"Unknown tool: {name}"}
