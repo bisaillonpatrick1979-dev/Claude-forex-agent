@@ -1,0 +1,141 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --bg: #0B0E11;
+  --bg-card: #131722;
+  --bg-panel: #1C2230;
+  --border: #2A2E3D;
+  --text: #D1D4DC;
+  --muted: #787B86;
+  --accent: #2962FF;
+  --green: #089981;
+  --red: #F23645;
+  --yellow: #F7A600;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-card);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Price numbers */
+.price {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Trading UI utilities */
+@layer utilities {
+  .bg-trading {
+    background-color: var(--bg);
+  }
+  .bg-card {
+    background-color: var(--bg-card);
+  }
+  .bg-panel {
+    background-color: var(--bg-panel);
+  }
+  .border-trading {
+    border-color: var(--border);
+  }
+  .text-green {
+    color: var(--green);
+  }
+  .text-red {
+    color: var(--red);
+  }
+  .text-muted {
+    color: var(--muted);
+  }
+  .text-accent {
+    color: var(--accent);
+  }
+  .btn-buy {
+    background-color: var(--green);
+    color: white;
+  }
+  .btn-sell {
+    background-color: var(--red);
+    color: white;
+  }
+}
+
+/* Glow effects for active states */
+.glow-green {
+  box-shadow: 0 0 8px rgba(8, 153, 129, 0.4);
+}
+.glow-red {
+  box-shadow: 0 0 8px rgba(242, 54, 69, 0.4);
+}
+.glow-blue {
+  box-shadow: 0 0 8px rgba(41, 98, 255, 0.4);
+}
+
+/* Blinking cursor for live data */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.live-dot {
+  animation: blink 1s ease-in-out infinite;
+}
+
+/* Agent status pulse */
+@keyframes agent-pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.7; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.agent-active {
+  animation: agent-pulse 1.5s ease-in-out infinite;
+}
+
+/* Chart container */
+#trading-chart {
+  width: 100%;
+  height: 100%;
+}
+
+/* Ticker tape */
+@keyframes ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* Smooth fade transitions */
+.fade-enter {
+  animation: fade-in 0.2s ease-in-out;
+}
