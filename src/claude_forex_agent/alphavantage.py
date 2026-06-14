@@ -1,4 +1,4 @@
-"""Alpha Vantage API client — real-time forex OHLC data with 60-second cache."""
+"""Alpha Vantage API client — real-time forex OHLC data with server-side cache."""
 
 import time
 from datetime import datetime, timezone
@@ -8,7 +8,14 @@ import httpx
 BASE_URL = "https://www.alphavantage.co/query"
 
 _cache: dict[str, tuple] = {}
-_CACHE_TTL = 60  # seconds — free tier: 5 req/min, 25/day
+_CACHE_TTL = 300  # 5 minutes — free tier: 25 req/day; serverless cache is per-instance
+
+_RATE_LIMIT_PHRASES = ("thank you for using alpha vantage", "higher api call volume")
+
+
+def _is_rate_limited(data: dict) -> bool:
+    note = (data.get("Note") or data.get("Information") or "").lower()
+    return any(p in note for p in _RATE_LIMIT_PHRASES)
 
 
 def _fetch(api_key: str, params: dict) -> dict:
@@ -40,6 +47,8 @@ def get_fx_intraday(api_key: str, from_sym: str, to_sym: str, interval: str) -> 
     })
     key = f"Time Series FX ({interval})"
     if key not in data:
+        if _is_rate_limited(data):
+            return {"error": "RATE_LIMIT"}
         return {"error": data.get("Note") or data.get("Information") or str(data)}
     candles = [
         {
@@ -64,6 +73,8 @@ def get_fx_daily(api_key: str, from_sym: str, to_sym: str) -> dict:
     })
     key = "Time Series FX (Daily)"
     if key not in data:
+        if _is_rate_limited(data):
+            return {"error": "RATE_LIMIT"}
         return {"error": data.get("Note") or data.get("Information") or str(data)}
     candles = [
         {

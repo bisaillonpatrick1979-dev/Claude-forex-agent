@@ -78,6 +78,15 @@ def get_candles(pair: str = "EURUSD", interval: str = "5m") -> dict:
     else:
         data = get_fx_intraday(api_key, from_sym, to_sym, av_interval)
     if "error" in data:
+        if data["error"] == "RATE_LIMIT":
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "Alpha Vantage free tier limit reached (25 requests/day). "
+                    "Data will reload from cache if available, or try again tomorrow. "
+                    "Upgrade at alphavantage.co/premium for unlimited access."
+                ),
+            )
         raise HTTPException(status_code=503, detail=data["error"])
     return data
 
@@ -670,25 +679,74 @@ function clearDrawings(){
 }
 
 /* =====================================================================
+   Browser-side localStorage cache (survives page refresh, saves API calls)
+===================================================================== */
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function lsGet(pair, tf){
+  try{
+    const raw=localStorage.getItem(`fx_${pair}_${tf}`);
+    if(!raw) return null;
+    const {ts,data}=JSON.parse(raw);
+    if(Date.now()-ts>CACHE_TTL_MS){localStorage.removeItem(`fx_${pair}_${tf}`);return null;}
+    return data;
+  }catch(_){return null;}
+}
+function lsSet(pair, tf, data){
+  try{localStorage.setItem(`fx_${pair}_${tf}`,JSON.stringify({ts:Date.now(),data}));}
+  catch(_){}
+}
+
+/* =====================================================================
    Data loading
 ===================================================================== */
 async function loadData(){
   document.getElementById('loading').style.display='flex';
   document.getElementById('error-bar').style.display='none';
+
+  // 1. Try browser cache first
+  const cached=lsGet(currentPair,currentTF);
+  if(cached){
+    candles=cached;
+    candleSeries.setData(candles);
+    updateIndicators();
+    mainChart.timeScale().fitContent();
+    if(candles.length) updateInfoBar(candles[candles.length-1]);
+    document.getElementById('loading').style.display='none';
+    return;
+  }
+
+  // 2. Fetch from server
   try{
     const r=await fetch(`/api/candles?pair=${currentPair}&interval=${currentTF}`);
-    if(!r.ok){const e=await r.json();throw new Error(e.detail||'API error');}
+    if(!r.ok){
+      const e=await r.json();
+      if(r.status===429){
+        showError('⏳ Limite Alpha Vantage atteinte (25 req/jour). '
+          +'Données rechargées depuis le cache si disponible — réessayez demain '
+          +'ou abonnez-vous sur alphavantage.co/premium');
+      } else {
+        showError(e.detail||'Erreur API');
+      }
+      document.getElementById('loading').style.display='none';
+      return;
+    }
     const d=await r.json();
     candles=d.candles;
+    lsSet(currentPair,currentTF,candles); // save to browser cache
     candleSeries.setData(candles);
     updateIndicators();
     mainChart.timeScale().fitContent();
     if(candles.length) updateInfoBar(candles[candles.length-1]);
   }catch(e){
-    document.getElementById('error-bar').textContent='⚠ '+e.message;
-    document.getElementById('error-bar').style.display='block';
+    showError('⚠ '+e.message);
   }
   document.getElementById('loading').style.display='none';
+}
+
+function showError(msg){
+  document.getElementById('error-bar').textContent=msg;
+  document.getElementById('error-bar').style.display='block';
 }
 
 /* =====================================================================
