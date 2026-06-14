@@ -1,4 +1,4 @@
-"""FastAPI web server — streaming chat UI backed by a Managed Agent session."""
+"""FastAPI server — professional forex trading terminal with Claude AI assistant."""
 
 import json
 import os
@@ -9,22 +9,33 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from claude_forex_agent.alphavantage import get_fx_daily, get_fx_intraday
 from claude_forex_agent.managed_agent import ForexManagedAgent
 
 load_dotenv()
 
-app = FastAPI(title="Claude Forex Agent")
+app = FastAPI(title="Forex Terminal")
 
 _managed: ForexManagedAgent | None = None
 
+FOREX_PAIRS = [
+    "EURUSD", "USDJPY", "GBPUSD", "USDCHF", "USDCAD", "AUDUSD", "NZDUSD",
+    "EURGBP", "EURJPY", "GBPJPY", "EURAUD", "EURCHF", "EURCAD",
+    "GBPAUD", "GBPCAD", "GBPCHF", "AUDJPY", "AUDCAD", "AUDNZD", "AUDCHF",
+    "CADJPY", "CHFJPY", "NZDJPY", "NZDCAD", "NZDCHF",
+]
+
+INTERVAL_MAP = {
+    "1m": "1min", "5m": "5min", "15m": "15min",
+    "30m": "30min", "1h": "60min", "1D": "1D",
+}
+
 
 def _require_env(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise ValueError(
-            f"{name} is not set. Run 'python setup_agent.py --write' first."
-        )
-    return value
+    v = os.environ.get(name)
+    if not v:
+        raise ValueError(f"{name} is not set. Run 'python setup_agent.py --write' first.")
+    return v
 
 
 def get_managed() -> ForexManagedAgent:
@@ -47,14 +58,34 @@ class ChatRequest(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    return CHAT_HTML
+    return TERMINAL_HTML
+
+
+@app.get("/api/pairs")
+def list_pairs() -> dict:
+    return {"pairs": FOREX_PAIRS}
+
+
+@app.get("/api/candles")
+def get_candles(pair: str = "EURUSD", interval: str = "5m") -> dict:
+    api_key = os.environ.get("ALPHAVANTAGE_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="ALPHAVANTAGE_API_KEY not configured.")
+    av_interval = INTERVAL_MAP.get(interval, "5min")
+    from_sym, to_sym = pair[:3].upper(), pair[3:6].upper()
+    if av_interval == "1D":
+        data = get_fx_daily(api_key, from_sym, to_sym)
+    else:
+        data = get_fx_intraday(api_key, from_sym, to_sym, av_interval)
+    if "error" in data:
+        raise HTTPException(status_code=503, detail=data["error"])
+    return data
 
 
 @app.post("/api/session")
 def create_session() -> dict:
     try:
-        session_id = get_managed().create_session()
-        return {"session_id": session_id}
+        return {"session_id": get_managed().create_session()}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -63,8 +94,8 @@ def create_session() -> dict:
 def chat(req: ChatRequest) -> StreamingResponse:
     def generate():
         try:
-            for event_type, data in get_managed().stream_response(req.session_id, req.message):
-                if event_type == "text":
+            for kind, data in get_managed().stream_response(req.session_id, req.message):
+                if kind == "text":
                     yield f"data: {json.dumps({'type': 'text', 'text': data})}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
@@ -77,344 +108,797 @@ def chat(req: ChatRequest) -> StreamingResponse:
     )
 
 
-CHAT_HTML = """<!DOCTYPE html>
+# ---------------------------------------------------------------------------
+# Trading Terminal HTML — single-file SPA
+# ---------------------------------------------------------------------------
+TERMINAL_HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Claude Forex Agent</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Forex Terminal</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
 :root{
-  --bg:#f4f5f7;--surface:#fff;--border:#e5e7eb;--text:#1a1a2e;
-  --accent:#1a1a2e;--accent-hover:#2d2d50;--muted:#888;
-  --user-bg:#1a1a2e;--user-text:#fff;
-  --agent-bg:#fff;--agent-text:#1a1a2e;
-  --radius:16px;--font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif
+  --bg:#0b0e1a;--surface:#131722;--panel:#1a1f33;--border:#252d45;
+  --text:#d1d5db;--muted:#6b7280;--accent:#2962ff;
+  --green:#26a69a;--red:#ef5350;--yellow:#ffd600;
+  --purple:#9c27b0;--orange:#ff9800;--pink:#e91e63;--sky:#00bcd4;
+  --font:'Inter',system-ui,sans-serif;
 }
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:var(--font);height:100vh;display:flex;flex-direction:column;
-     background:var(--bg);color:var(--text);overflow:hidden}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+          font-family:var(--font);font-size:13px}
 
-/* ── Header ── */
-header{
-  background:var(--accent);color:#fff;padding:13px 20px;flex-shrink:0;
-  display:flex;align-items:center;justify-content:space-between;
-  box-shadow:0 2px 10px rgba(0,0,0,.2)
-}
-.hdr-left{display:flex;align-items:center;gap:10px}
-.hdr-left h1{font-size:16px;font-weight:600;letter-spacing:.2px}
-.hdr-left span{font-size:11px;opacity:.55;background:rgba(255,255,255,.12);
-               padding:2px 8px;border-radius:10px}
-#new-chat{
-  background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);
-  color:#fff;padding:5px 13px;border-radius:7px;cursor:pointer;font-size:13px;
-  transition:background .15s
-}
-#new-chat:hover{background:rgba(255,255,255,.2)}
+/* ── App layout ── */
+#app{display:flex;flex-direction:column;height:100%}
 
-/* ── Chat area ── */
-#chat{
-  flex:1;overflow-y:auto;padding:24px 20px;
-  display:flex;flex-direction:column;gap:18px;min-height:0
+/* ── Top bar ── */
+#topbar{
+  background:var(--surface);border-bottom:1px solid var(--border);
+  height:46px;display:flex;align-items:center;gap:6px;padding:0 12px;
+  flex-shrink:0;user-select:none
+}
+#logo{font-size:15px;font-weight:700;color:var(--accent);margin-right:8px;white-space:nowrap}
+#cur-pair{font-size:16px;font-weight:700;color:#fff;min-width:90px}
+.sep{width:1px;height:22px;background:var(--border);margin:0 4px}
+
+/* Timeframe buttons */
+.tf-btn{
+  background:none;border:1px solid transparent;color:var(--muted);
+  padding:4px 9px;border-radius:5px;cursor:pointer;font-size:12px;
+  transition:all .12s
+}
+.tf-btn:hover{color:var(--text);border-color:var(--border)}
+.tf-btn.on{color:#fff;background:var(--accent);border-color:var(--accent)}
+
+/* Indicator + tool buttons */
+.ind-btn,.tool-btn{
+  background:none;border:1px solid var(--border);color:var(--muted);
+  padding:3px 9px;border-radius:5px;cursor:pointer;font-size:11px;font-weight:600;
+  transition:all .12s;letter-spacing:.3px
+}
+.ind-btn:hover,.tool-btn:hover{color:var(--text)}
+.ind-btn.on{color:#fff;border-color:currentColor}
+.ind-btn.bb.on{color:var(--purple)}
+.ind-btn.ma20.on{color:var(--accent)}
+.ind-btn.ma50.on{color:var(--orange)}
+.ind-btn.ma200.on{color:var(--pink)}
+.ind-btn.rsi.on{color:var(--sky)}
+.ind-btn.macd.on{color:var(--green)}
+.tool-btn.on{color:var(--yellow);border-color:var(--yellow)}
+#fib-hint{color:var(--yellow);font-size:11px;display:none;padding:0 6px}
+
+#ai-toggle{
+  margin-left:auto;background:var(--accent);border:none;color:#fff;
+  padding:5px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;
+  white-space:nowrap
+}
+#ai-toggle:hover{background:#1e50d4}
+
+/* ── Body ── */
+#body{flex:1;display:flex;overflow:hidden}
+
+/* ── Pair sidebar ── */
+#sidebar{
+  width:140px;background:var(--surface);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;flex-shrink:0
+}
+#pair-search{
+  width:100%;background:var(--panel);border:none;border-bottom:1px solid var(--border);
+  color:var(--text);padding:8px 10px;font-size:12px;outline:none
+}
+#pair-search::placeholder{color:var(--muted)}
+#pair-list{overflow-y:auto;flex:1}
+.pair-item{
+  padding:7px 10px;cursor:pointer;color:var(--muted);font-size:12px;
+  transition:background .1s;border-left:2px solid transparent
+}
+.pair-item:hover{background:var(--panel);color:var(--text)}
+.pair-item.on{background:var(--panel);color:#fff;border-left-color:var(--accent)}
+
+/* ── Chart area ── */
+#chart-area{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative}
+
+/* info bar */
+#info-bar{
+  height:26px;background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:14px;padding:0 12px;flex-shrink:0;
+  font-size:12px;font-family:monospace
+}
+.info-o{color:var(--text)} .info-h{color:var(--green)} .info-l{color:var(--red)}
+.info-c{color:var(--text)} #info-chg{font-weight:600}
+#error-bar{
+  display:none;background:#3d1a1a;color:#f87171;border-bottom:1px solid #7f1d1d;
+  padding:6px 12px;font-size:12px
 }
 
-/* ── Welcome ── */
-#welcome{
-  flex:1;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;text-align:center;padding:40px 20px;color:#666
-}
-#welcome h2{font-size:22px;color:var(--text);font-weight:600;margin-bottom:8px}
-#welcome p{font-size:14px;max-width:400px;line-height:1.6;color:#777}
-.examples{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:20px}
-.ex{
-  background:var(--surface);border:1.5px solid var(--border);
-  padding:8px 15px;border-radius:18px;font-size:13px;cursor:pointer;
-  color:#555;transition:border-color .15s,background .15s;white-space:nowrap
-}
-.ex:hover{border-color:var(--accent);background:#f0f0f8;color:var(--accent)}
+/* charts */
+#main-chart{flex:1;min-height:200px}
+#rsi-pane{height:110px;display:none;border-top:1px solid var(--border)}
+#macd-pane{height:110px;display:none;border-top:1px solid var(--border)}
 
-/* ── Messages ── */
-.msg{max-width:780px;display:flex;flex-direction:column}
-.msg.user{align-self:flex-end;align-items:flex-end}
-.msg.agent{align-self:flex-start;align-items:flex-start}
-.lbl{font-size:10px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;
-     color:var(--muted);margin-bottom:4px}
-.bubble{
-  padding:11px 15px;border-radius:var(--radius);font-size:15px;
-  line-height:1.65;max-width:680px;position:relative
+/* loading overlay */
+#loading{
+  position:absolute;inset:0;background:rgba(11,14,26,.7);
+  display:none;align-items:center;justify-content:center;z-index:10
 }
-.msg.user .bubble{
-  background:var(--user-bg);color:var(--user-text);
-  border-bottom-right-radius:4px;white-space:pre-wrap;word-break:break-word
+.spinner{
+  width:32px;height:32px;border:3px solid var(--border);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite
 }
-.msg.agent .bubble{
-  background:var(--agent-bg);color:var(--agent-text);
-  border-bottom-left-radius:4px;box-shadow:0 1px 6px rgba(0,0,0,.07)
-}
+@keyframes spin{to{transform:rotate(360deg)}}
 
-/* ── Markdown styles inside agent bubbles ── */
-.bubble h1,.bubble h2,.bubble h3{
-  font-weight:600;margin:14px 0 6px;color:var(--text)
+/* ── AI Chat panel ── */
+#ai-panel{
+  width:320px;background:var(--surface);border-left:1px solid var(--border);
+  display:none;flex-direction:column;flex-shrink:0
 }
-.bubble h1{font-size:17px} .bubble h2{font-size:16px} .bubble h3{font-size:15px}
-.bubble p{margin-bottom:10px}
-.bubble p:last-child{margin-bottom:0}
-.bubble ul,.bubble ol{padding-left:20px;margin-bottom:10px}
-.bubble li{margin-bottom:3px}
-.bubble table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}
-.bubble th,.bubble td{border:1px solid #ddd;padding:6px 10px;text-align:left}
-.bubble th{background:#f4f5f7;font-weight:600}
-.bubble code{
-  background:#f0f0f6;padding:1px 5px;border-radius:4px;
-  font-family:'SF Mono',Consolas,monospace;font-size:13px
+#ai-panel.open{display:flex}
+#ai-header{
+  padding:10px 14px;border-bottom:1px solid var(--border);
+  font-weight:600;font-size:13px;color:#fff;
+  display:flex;align-items:center;justify-content:space-between
 }
-.bubble pre{
-  background:#f0f0f6;padding:10px 12px;border-radius:8px;overflow-x:auto;
-  margin:8px 0
+#ai-close{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px}
+#ai-close:hover{color:var(--text)}
+#ai-msgs{
+  flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px
 }
-.bubble pre code{background:none;padding:0}
-.bubble strong{font-weight:600}
-.bubble blockquote{
-  border-left:3px solid #ddd;padding-left:12px;color:#666;margin:8px 0
+.ai-msg{display:flex;flex-direction:column;gap:4px}
+.ai-role{font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;
+         color:var(--muted)}
+.ai-bubble{
+  background:var(--panel);padding:10px 12px;border-radius:10px;
+  font-size:13px;line-height:1.6;color:var(--text)
 }
-
-/* ── Streaming cursor ── */
-.cursor{
-  display:inline-block;width:2px;height:15px;background:currentColor;
-  margin-left:2px;vertical-align:middle;animation:blink 1s step-end infinite
-}
-@keyframes blink{50%{opacity:0}}
-
-/* ── Copy button ── */
-.copy-btn{
-  position:absolute;top:8px;right:8px;
-  background:rgba(0,0,0,.06);border:none;border-radius:5px;
-  padding:3px 8px;font-size:11px;cursor:pointer;color:#666;
-  opacity:0;transition:opacity .15s
-}
-.bubble:hover .copy-btn{opacity:1}
-.copy-btn:hover{background:rgba(0,0,0,.12);color:#333}
-.copy-btn.copied{color:#2ecc71}
-
-/* ── Error ── */
-.err{color:#c0392b;font-style:italic}
-
-/* ── Typing dots ── */
-.dots span{
-  display:inline-block;width:6px;height:6px;background:#bbb;border-radius:50%;
-  margin:0 2px;animation:dot .9s ease-in-out infinite
-}
+.ai-bubble.user{background:var(--accent);color:#fff;align-self:flex-end}
+/* markdown inside AI bubble */
+.ai-bubble h1,.ai-bubble h2,.ai-bubble h3{font-size:13px;font-weight:700;
+  margin:8px 0 4px;color:#fff}
+.ai-bubble p{margin-bottom:6px}.ai-bubble p:last-child{margin:0}
+.ai-bubble ul,.ai-bubble ol{padding-left:16px;margin-bottom:6px}
+.ai-bubble li{margin-bottom:2px}
+.ai-bubble table{border-collapse:collapse;width:100%;margin:6px 0;font-size:12px}
+.ai-bubble th,.ai-bubble td{border:1px solid var(--border);padding:4px 8px}
+.ai-bubble th{background:var(--surface)}
+.ai-bubble code{background:rgba(255,255,255,.1);padding:1px 4px;border-radius:3px;
+                font-size:12px}
+.ai-bubble strong{color:#fff}
+.dots span{display:inline-block;width:5px;height:5px;background:var(--muted);
+           border-radius:50%;margin:0 1px;animation:dot .9s ease-in-out infinite}
 .dots span:nth-child(2){animation-delay:.15s}
 .dots span:nth-child(3){animation-delay:.3s}
-@keyframes dot{0%,80%,100%{transform:scale(.8);opacity:.4}40%{transform:scale(1);opacity:1}}
-
-/* ── Input area ── */
-#input-area{
-  padding:12px 20px;background:var(--surface);border-top:1px solid var(--border);
-  display:flex;gap:9px;align-items:flex-end;flex-shrink:0
+@keyframes dot{0%,80%,100%{transform:scale(.7);opacity:.4}40%{transform:scale(1);opacity:1}}
+#ai-input-row{
+  padding:10px;border-top:1px solid var(--border);display:flex;gap:8px
 }
-#msg{
-  flex:1;border:1.5px solid var(--border);border-radius:12px;
-  padding:10px 14px;font-size:15px;font-family:var(--font);
-  resize:none;min-height:44px;max-height:160px;outline:none;
-  transition:border-color .2s;background:#fafafa;line-height:1.5
+#ai-input{
+  flex:1;background:var(--panel);border:1px solid var(--border);
+  border-radius:8px;color:var(--text);padding:8px 10px;
+  font-size:13px;font-family:var(--font);resize:none;outline:none;
+  max-height:100px;min-height:36px;line-height:1.4
 }
-#msg:focus{border-color:var(--accent);background:#fff}
-#send{
-  background:var(--accent);color:#fff;border:none;border-radius:10px;
-  padding:0 18px;height:44px;font-size:15px;cursor:pointer;
-  transition:background .15s;flex-shrink:0
+#ai-input:focus{border-color:var(--accent)}
+#ai-send{
+  background:var(--accent);border:none;color:#fff;border-radius:8px;
+  padding:8px 14px;cursor:pointer;font-size:13px
 }
-#send:hover:not(:disabled){background:var(--accent-hover)}
-#send:disabled{background:#c0c0cc;cursor:not-allowed}
+#ai-send:disabled{background:var(--border);cursor:not-allowed}
 </style>
 </head>
 <body>
-<header>
-  <div class="hdr-left">
-    <h1>&#x1F4B1; Claude Forex Agent</h1>
-    <span>Managed Agents</span>
-  </div>
-  <button id="new-chat" onclick="newChat()">&#x2B; New Chat</button>
-</header>
+<div id="app">
 
-<div id="chat">
-  <div id="welcome">
-    <h2>Foreign Exchange Assistant</h2>
-    <p>Ask about live rates, conversions, historical trends, and in-depth FX analysis.</p>
-    <div class="examples">
-      <button class="ex" onclick="useEx(this)">USD/EUR rate today</button>
-      <button class="ex" onclick="useEx(this)">Convert 1000 GBP to JPY</button>
-      <button class="ex" onclick="useEx(this)">USD/CAD trend last 30 days</button>
-      <button class="ex" onclick="useEx(this)">Analyze EUR/GBP vs EUR/CHF</button>
-      <button class="ex" onclick="useEx(this)">List all supported currencies</button>
+<!-- ── Top bar ── -->
+<div id="topbar">
+  <span id="logo">&#x1F4B9; ForexAI</span>
+  <span id="cur-pair">EUR/USD</span>
+  <div class="sep"></div>
+
+  <!-- Timeframes -->
+  <button class="tf-btn" data-tf="1m" onclick="setTF(this)">1m</button>
+  <button class="tf-btn on" data-tf="5m" onclick="setTF(this)">5m</button>
+  <button class="tf-btn" data-tf="15m" onclick="setTF(this)">15m</button>
+  <button class="tf-btn" data-tf="30m" onclick="setTF(this)">30m</button>
+  <button class="tf-btn" data-tf="1h" onclick="setTF(this)">1h</button>
+  <button class="tf-btn" data-tf="1D" onclick="setTF(this)">1D</button>
+  <div class="sep"></div>
+
+  <!-- Indicators -->
+  <button class="ind-btn bb" id="ind-bb" onclick="toggleBB()">BB</button>
+  <button class="ind-btn ma20 on" id="ind-ma20" onclick="toggleMA(20)">MA20</button>
+  <button class="ind-btn ma50" id="ind-ma50" onclick="toggleMA(50)">MA50</button>
+  <button class="ind-btn ma200" id="ind-ma200" onclick="toggleMA(200)">MA200</button>
+  <button class="ind-btn rsi" id="ind-rsi" onclick="toggleRSI()">RSI</button>
+  <button class="ind-btn macd" id="ind-macd" onclick="toggleMACD()">MACD</button>
+  <div class="sep"></div>
+
+  <!-- Drawing tools -->
+  <button class="tool-btn" id="tool-hline" onclick="setTool('hline')"
+    title="Horizontal line">&#x2014;</button>
+  <button class="tool-btn" id="tool-fib" onclick="setTool('fib')"
+    title="Fibonacci retracement">Fib</button>
+  <button class="tool-btn" id="tool-tl" onclick="setTool('tl')"
+    title="Trend line">&#x2197;</button>
+  <button class="tool-btn" onclick="clearDrawings()" title="Clear drawings">&#x2715;</button>
+  <span id="fib-hint">Click 2nd point</span>
+
+  <button id="ai-toggle" onclick="toggleAI()">&#x1F916; AI Analyst</button>
+</div>
+
+<!-- ── Body ── -->
+<div id="body">
+
+  <!-- Pair sidebar -->
+  <aside id="sidebar">
+    <input id="pair-search" placeholder="Search..." oninput="filterPairs(this.value)">
+    <div id="pair-list"></div>
+  </aside>
+
+  <!-- Chart area -->
+  <div id="chart-area">
+    <div id="error-bar"></div>
+    <div id="info-bar">
+      <span class="info-o" id="ib-o">O —</span>
+      <span class="info-h" id="ib-h">H —</span>
+      <span class="info-l" id="ib-l">L —</span>
+      <span class="info-c" id="ib-c">C —</span>
+      <span id="info-chg">—</span>
+    </div>
+    <div id="main-chart"></div>
+    <div id="rsi-pane"></div>
+    <div id="macd-pane"></div>
+    <div id="loading"><div class="spinner"></div></div>
+  </div>
+
+  <!-- AI Chat panel -->
+  <div id="ai-panel">
+    <div id="ai-header">
+      <span>&#x1F916; Claude AI Analyst</span>
+      <button id="ai-close" onclick="toggleAI()">&#x2715;</button>
+    </div>
+    <div id="ai-msgs">
+      <div class="ai-msg">
+        <div class="ai-role">Agent</div>
+        <div class="ai-bubble">
+          Hello! I can analyze any forex pair, explain technical levels,
+          fetch live rates, or discuss market trends. What would you like to know?
+        </div>
+      </div>
+    </div>
+    <div id="ai-input-row">
+      <textarea id="ai-input" rows="1" placeholder="Ask about the chart…"
+        onkeydown="aiKey(event)" oninput="aiResize(this)"></textarea>
+      <button id="ai-send" onclick="aiSend()">&#x27A4;</button>
     </div>
   </div>
-</div>
 
-<div id="input-area">
-  <textarea id="msg" placeholder="Ask about exchange rates…" rows="1"
-    onkeydown="onKey(event)" oninput="resize(this)"></textarea>
-  <button id="send" onclick="send()">Send</button>
-</div>
+</div><!-- body -->
+</div><!-- app -->
 
 <script>
-// Configure marked for safe rendering
-marked.setOptions({breaks: true, gfm: true});
+'use strict';
 
-let sessionId = null, busy = false;
+/* =====================================================================
+   State
+===================================================================== */
+let currentPair = 'EURUSD', currentTF = '5m', candles = [];
+let activeTool = null, fibPt1 = null, tlPt1 = null;
+let hLines = [], fibLines = [], tlSeries = [];
+let showBB = false, showMA20 = true, showMA50 = false, showMA200 = false;
+let showRSI = false, showMACD = false;
+let sessionId = null, aiBusy = false;
+let PAIRS = [];
 
-async function initSession() {
-  try {
-    const r = await fetch('/api/session', {method: 'POST'});
-    const d = await r.json();
-    sessionId = d.session_id || null;
-  } catch(e) { console.error('Session init failed:', e); }
+/* =====================================================================
+   Chart objects
+===================================================================== */
+let mainChart, candleSeries;
+let bbUp, bbMid, bbLo, ma20s, ma50s, ma200s;
+let rsiChart, rsiSeries;
+let macdChart, macdLine, macdSig, macdHist;
+
+/* =====================================================================
+   Lightweight Charts helpers
+===================================================================== */
+const BASE_OPTS = {
+  layout:{background:{type:'solid',color:'#0b0e1a'},textColor:'#9ca3af'},
+  grid:{vertLines:{color:'#1a1f33'},horzLines:{color:'#1a1f33'}},
+  crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
+  rightPriceScale:{borderColor:'#252d45'},
+  timeScale:{borderColor:'#252d45',timeVisible:true,secondsVisible:false},
+  handleScroll:true,handleScale:true,
+};
+
+function chartSize(el){
+  return {width:el.clientWidth||600, height:el.clientHeight||300};
 }
 
-function newChat() {
-  sessionId = null;
-  document.getElementById('chat').innerHTML = `
-    <div id="welcome">
-      <h2>Foreign Exchange Assistant</h2>
-      <p>Ask about live rates, conversions, historical trends, and in-depth FX analysis.</p>
-      <div class="examples">
-        <button class="ex" onclick="useEx(this)">USD/EUR rate today</button>
-        <button class="ex" onclick="useEx(this)">Convert 1000 GBP to JPY</button>
-        <button class="ex" onclick="useEx(this)">USD/CAD trend last 30 days</button>
-        <button class="ex" onclick="useEx(this)">Analyze EUR/GBP vs EUR/CHF</button>
-        <button class="ex" onclick="useEx(this)">List all supported currencies</button>
-      </div>
-    </div>`;
-  initSession();
+function initMainChart(){
+  const el = document.getElementById('main-chart');
+  mainChart = LightweightCharts.createChart(el,{...BASE_OPTS,...chartSize(el)});
+
+  candleSeries = mainChart.addCandlestickSeries({
+    upColor:'#26a69a',downColor:'#ef5350',
+    borderUpColor:'#26a69a',borderDownColor:'#ef5350',
+    wickUpColor:'#26a69a',wickDownColor:'#ef5350',
+  });
+
+  // Overlay indicator series
+  ma20s  = mainChart.addLineSeries({color:'#2962ff',lineWidth:1,title:'MA20',visible:true});
+  ma50s  = mainChart.addLineSeries({color:'#ff9800',lineWidth:1,title:'MA50',visible:false});
+  ma200s = mainChart.addLineSeries({color:'#e91e63',lineWidth:1,title:'MA200',visible:false});
+  bbUp   = mainChart.addLineSeries({color:'#9c27b0',lineWidth:1,
+    lineStyle:LightweightCharts.LineStyle.Dashed,title:'BB+',visible:false});
+  bbMid  = mainChart.addLineSeries({color:'#9c27b0',lineWidth:1,title:'BB',visible:false});
+  bbLo   = mainChart.addLineSeries({color:'#9c27b0',lineWidth:1,
+    lineStyle:LightweightCharts.LineStyle.Dashed,title:'BB-',visible:false});
+
+  // Crosshair → info bar
+  mainChart.subscribeCrosshairMove(p => {
+    if(p.seriesPrices && p.seriesPrices.has(candleSeries)){
+      updateInfoBar(p.seriesPrices.get(candleSeries));
+    }
+  });
+
+  // Click → drawing tools
+  mainChart.subscribeClick(p => {
+    if(!p.point || !p.time) return;
+    const price = candleSeries.coordinateToPrice(p.point.y);
+    if(price == null) return;
+    handleClick(p.time, price, p.point);
+  });
+
+  new ResizeObserver(()=>{
+    mainChart.applyOptions(chartSize(el));
+  }).observe(el);
 }
 
-function useEx(btn) {
-  document.getElementById('msg').value = btn.textContent;
-  send();
+function initRSI(){
+  const el = document.getElementById('rsi-pane');
+  rsiChart = LightweightCharts.createChart(el,{
+    ...BASE_OPTS,...chartSize(el),
+    rightPriceScale:{...BASE_OPTS.rightPriceScale,scaleMargins:{top:.1,bottom:.1}},
+    timeScale:{...BASE_OPTS.timeScale,visible:false},
+  });
+  rsiSeries = rsiChart.addLineSeries({color:'#00bcd4',lineWidth:1,title:'RSI(14)'});
+  new ResizeObserver(()=>rsiChart.applyOptions(chartSize(el))).observe(el);
 }
 
-function resize(el) {
-  el.style.height = 'auto';
-  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+function initMACD(){
+  const el = document.getElementById('macd-pane');
+  macdChart = LightweightCharts.createChart(el,{
+    ...BASE_OPTS,...chartSize(el),
+    timeScale:{...BASE_OPTS.timeScale,visible:false},
+  });
+  macdLine = macdChart.addLineSeries({color:'#2962ff',lineWidth:1,title:'MACD'});
+  macdSig  = macdChart.addLineSeries({color:'#ff9800',lineWidth:1,title:'Signal'});
+  macdHist = macdChart.addHistogramSeries({
+    color:'#26a69a',title:'Hist',
+    priceFormat:{type:'price',precision:6,minMove:.000001},
+  });
+  new ResizeObserver(()=>macdChart.applyOptions(chartSize(el))).observe(el);
 }
 
-function onKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+function syncTimeScales(){
+  let syncing = false;
+  function sync(src, ...targets){
+    src.timeScale().subscribeVisibleLogicalRangeChange(range=>{
+      if(syncing||!range) return;
+      syncing=true;
+      targets.forEach(c=>c.timeScale().setVisibleLogicalRange(range));
+      syncing=false;
+    });
+  }
+  sync(mainChart, rsiChart, macdChart);
+  sync(rsiChart,  mainChart, macdChart);
+  sync(macdChart, mainChart, rsiChart);
 }
 
-function addMsg(role, text) {
-  const chat = document.getElementById('chat');
-  const w = document.getElementById('welcome');
-  if (w) w.remove();
-  const d = document.createElement('div');
-  d.className = 'msg ' + role;
-  d.innerHTML = '<div class="lbl">' + (role === 'user' ? 'You' : 'Agent') + '</div>'
-              + '<div class="bubble"></div>';
-  d.querySelector('.bubble').textContent = text;
-  chat.appendChild(d);
-  chat.scrollTop = chat.scrollHeight;
-  return d.querySelector('.bubble');
+/* =====================================================================
+   Technical indicators
+===================================================================== */
+function sma(arr, n){
+  const r=[];
+  for(let i=n-1;i<arr.length;i++){
+    r.push(arr.slice(i-n+1,i+1).reduce((a,b)=>a+b,0)/n);
+  }
+  return r;
 }
 
-function addAgentBubble() {
-  const chat = document.getElementById('chat');
-  const w = document.getElementById('welcome');
-  if (w) w.remove();
-  const d = document.createElement('div');
-  d.className = 'msg agent';
-  d.innerHTML = '<div class="lbl">Agent</div>'
-    + '<div class="bubble">'
-    + '<div class="dots"><span></span><span></span><span></span></div>'
-    + '</div>';
-  chat.appendChild(d);
-  chat.scrollTop = chat.scrollHeight;
-  return d.querySelector('.bubble');
+function ema(arr, n){
+  if(arr.length<n) return [];
+  const k=2/(n+1);
+  let e=arr.slice(0,n).reduce((a,b)=>a+b,0)/n;
+  const r=[e];
+  for(let i=n;i<arr.length;i++){r.push(arr[i]*k+e*(1-k));e=r[r.length-1];}
+  return r; // length = arr.length - n + 1
 }
 
-function copyText(btn) {
-  const raw = btn.dataset.raw || '';
-  navigator.clipboard.writeText(raw).then(() => {
-    btn.textContent = 'Copied!';
-    btn.classList.add('copied');
-    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+function withTime(candles, offset, values){
+  return values.map((v,i)=>({time:candles[i+offset].time, value:v}));
+}
+
+function calcBB(candles,n=20,m=2){
+  const cl=candles.map(c=>c.close), up=[], mid=[], lo=[];
+  for(let i=n-1;i<candles.length;i++){
+    const sl=cl.slice(i-n+1,i+1);
+    const avg=sl.reduce((a,b)=>a+b,0)/n;
+    const std=Math.sqrt(sl.reduce((s,v)=>s+(v-avg)**2,0)/n);
+    up.push({time:candles[i].time,value:avg+m*std});
+    mid.push({time:candles[i].time,value:avg});
+    lo.push({time:candles[i].time,value:avg-m*std});
+  }
+  return{up,mid,lo};
+}
+
+function calcSMA(candles,n){
+  const cl=candles.map(c=>c.close);
+  return withTime(candles,n-1,sma(cl,n));
+}
+
+function calcRSI(candles,n=14){
+  const cl=candles.map(c=>c.close);
+  if(cl.length<=n) return [];
+  let ag=0,al=0;
+  for(let i=1;i<=n;i++){const d=cl[i]-cl[i-1];d>0?ag+=d:al-=d;}
+  ag/=n;al/=n;
+  const r=[{time:candles[n].time,value:100-100/(1+(al?ag/al:Infinity))}];
+  for(let i=n+1;i<candles.length;i++){
+    const d=cl[i]-cl[i-1];
+    ag=(ag*(n-1)+(d>0?d:0))/n;
+    al=(al*(n-1)+(d<0?-d:0))/n;
+    r.push({time:candles[i].time,value:100-100/(1+(al?ag/al:Infinity))});
+  }
+  return r;
+}
+
+function calcMACD(candles,f=12,sl=26,sig=9){
+  const cl=candles.map(c=>c.close);
+  if(cl.length<sl+sig) return{macd:[],signal:[],hist:[]};
+  const e12=ema(cl,f), e26=ema(cl,sl);
+  const offset26=sl-1, diff=sl-f;
+  const macdArr=e26.map((v,i)=>({time:candles[offset26+i].time,value:e12[i+diff]-v}));
+  const raw=macdArr.map(p=>p.value);
+  const sigE=ema(raw,sig);
+  const offset2=sig-1;
+  const signal=sigE.map((v,i)=>({time:macdArr[i+offset2].time,value:v}));
+  const hist=sigE.map((v,i)=>{
+    const mv=macdArr[i+offset2].value;
+    return{time:macdArr[i+offset2].time,value:mv-v,color:(mv-v)>=0?'#26a69a':'#ef5350'};
+  });
+  return{macd:macdArr,signal,hist};
+}
+
+function updateIndicators(){
+  if(!candles.length) return;
+  ma20s.setData(calcSMA(candles,20));
+  ma50s.setData(calcSMA(candles,50));
+  ma200s.setData(calcSMA(candles,200));
+  const bb=calcBB(candles);
+  bbUp.setData(bb.up); bbMid.setData(bb.mid); bbLo.setData(bb.lo);
+  rsiSeries.setData(calcRSI(candles));
+  const {macd,signal,hist}=calcMACD(candles);
+  macdLine.setData(macd); macdSig.setData(signal); macdHist.setData(hist);
+}
+
+/* =====================================================================
+   Drawing tools
+===================================================================== */
+function setTool(name){
+  activeTool = activeTool===name ? null : name;
+  fibPt1=null; tlPt1=null;
+  document.getElementById('fib-hint').style.display='none';
+  ['hline','fib','tl'].forEach(t=>{
+    document.getElementById('tool-'+t).classList.toggle('on',activeTool===t);
+  });
+  document.getElementById('main-chart').style.cursor = activeTool?'crosshair':'default';
+}
+
+function handleClick(time, price, point){
+  if(activeTool==='hline'){
+    const ln=candleSeries.createPriceLine({
+      price, color:'#ffd600', lineWidth:1,
+      lineStyle:LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible:true, title:fmt(price),
+    });
+    hLines.push(ln);
+    setTool(null);
+  } else if(activeTool==='fib'){
+    if(!fibPt1){
+      fibPt1=price;
+      document.getElementById('fib-hint').style.display='inline';
+    } else {
+      drawFib(fibPt1,price);
+      fibPt1=null;
+      document.getElementById('fib-hint').style.display='none';
+      setTool(null);
+    }
+  } else if(activeTool==='tl'){
+    if(!tlPt1){
+      tlPt1={time,price};
+    } else {
+      drawTrendLine(tlPt1,{time,price});
+      tlPt1=null;
+      setTool(null);
+    }
+  }
+}
+
+function drawFib(p1,p2){
+  const hi=Math.max(p1,p2), lo=Math.min(p1,p2), rng=hi-lo;
+  fibLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(_){}});
+  fibLines=[];
+  const lvls=[
+    [0,    '#ef5350'],
+    [.236, '#ff9800'],
+    [.382, '#ffd600'],
+    [.5,   '#a5f3fc'],
+    [.618, '#86efac'],
+    [.786, '#c084fc'],
+    [1,    '#ef5350'],
+  ];
+  lvls.forEach(([lv,color])=>{
+    const pr=hi-rng*lv;
+    fibLines.push(candleSeries.createPriceLine({
+      price:pr, color, lineWidth:1,
+      lineStyle:LightweightCharts.LineStyle.Dashed,
+      axisLabelVisible:true, title:`${(lv*100).toFixed(1)}%`,
+    }));
   });
 }
 
-async function send() {
-  const input = document.getElementById('msg');
-  const message = input.value.trim();
-  if (!message || busy) return;
-  if (!sessionId) { await initSession(); }
-
-  input.value = '';
-  input.style.height = 'auto';
-  busy = true;
-  document.getElementById('send').disabled = true;
-
-  addMsg('user', message);
-  const bubble = addAgentBubble();
-
-  let text = '';
-  let started = false;
-
-  try {
-    const resp = await fetch('/api/chat', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({session_id: sessionId, message}),
-    });
-
-    const reader = resp.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    const chat = document.getElementById('chat');
-
-    while (true) {
-      const {done, value} = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, {stream: true});
-      const lines = buf.split('\\n');
-      buf = lines.pop();
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const ev = JSON.parse(line.slice(6));
-          if (ev.type === 'text') {
-            if (!started) {
-              // Remove the typing dots, add cursor for streaming
-              bubble.innerHTML = '<span class="cursor"></span>';
-              started = true;
-            }
-            text += ev.text;
-            bubble.textContent = text;
-            const c = document.createElement('span');
-            c.className = 'cursor';
-            bubble.appendChild(c);
-            chat.scrollTop = chat.scrollHeight;
-          } else if (ev.type === 'done') {
-            // Render markdown and add copy button
-            bubble.innerHTML = marked.parse(text)
-              + '<button class="copy-btn" data-raw="" onclick="copyText(this)">Copy</button>';
-            bubble.querySelector('.copy-btn').dataset.raw = text;
-            chat.scrollTop = chat.scrollHeight;
-          } else if (ev.type === 'error') {
-            bubble.innerHTML = '<span class="err">Error: ' + ev.message + '</span>';
-          }
-        } catch(_) {}
-      }
-    }
-  } catch(e) {
-    bubble.innerHTML = '<span class="err">Connection error. Please try again.</span>';
-  }
-
-  busy = false;
-  document.getElementById('send').disabled = false;
-  document.getElementById('msg').focus();
+function drawTrendLine(pt1, pt2){
+  // Render as a line series with two anchor points extended slightly
+  const s=mainChart.addLineSeries({color:'#ffd600',lineWidth:1,
+    lineStyle:LightweightCharts.LineStyle.Solid,lastValueVisible:false,
+    priceLineVisible:false});
+  s.setData([{time:pt1.time,value:pt1.price},{time:pt2.time,value:pt2.price}]);
+  tlSeries.push(s);
 }
 
-initSession();
+function clearDrawings(){
+  hLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(_){}});
+  fibLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(_){}});
+  tlSeries.forEach(s=>{try{mainChart.removeSeries(s);}catch(_){}});
+  hLines=[]; fibLines=[]; tlSeries=[];
+  fibPt1=null; tlPt1=null;
+  document.getElementById('fib-hint').style.display='none';
+  setTool(null);
+}
+
+/* =====================================================================
+   Data loading
+===================================================================== */
+async function loadData(){
+  document.getElementById('loading').style.display='flex';
+  document.getElementById('error-bar').style.display='none';
+  try{
+    const r=await fetch(`/api/candles?pair=${currentPair}&interval=${currentTF}`);
+    if(!r.ok){const e=await r.json();throw new Error(e.detail||'API error');}
+    const d=await r.json();
+    candles=d.candles;
+    candleSeries.setData(candles);
+    updateIndicators();
+    mainChart.timeScale().fitContent();
+    if(candles.length) updateInfoBar(candles[candles.length-1]);
+  }catch(e){
+    document.getElementById('error-bar').textContent='⚠ '+e.message;
+    document.getElementById('error-bar').style.display='block';
+  }
+  document.getElementById('loading').style.display='none';
+}
+
+/* =====================================================================
+   UI interactions
+===================================================================== */
+function fmt(p){
+  const a=Math.abs(p);
+  return a<10?p.toFixed(5):a<100?p.toFixed(3):p.toFixed(2);
+}
+
+function updateInfoBar(c){
+  document.getElementById('ib-o').textContent='O '+fmt(c.open);
+  document.getElementById('ib-h').textContent='H '+fmt(c.high);
+  document.getElementById('ib-l').textContent='L '+fmt(c.low);
+  document.getElementById('ib-c').textContent='C '+fmt(c.close);
+  const chg=c.close-c.open, pct=c.open>0?(chg/c.open*100):0;
+  const el=document.getElementById('info-chg');
+  el.textContent=(chg>=0?'+':'')+fmt(chg)+' ('+(pct>=0?'+':'')+pct.toFixed(2)+'%)';
+  el.style.color=chg>=0?'#26a69a':'#ef5350';
+}
+
+function selectPair(pair){
+  currentPair=pair;
+  document.getElementById('cur-pair').textContent=pair.slice(0,3)+'/'+pair.slice(3);
+  document.querySelectorAll('.pair-item').forEach(b=>b.classList.toggle('on',b.dataset.pair===pair));
+  clearDrawings(); loadData();
+}
+
+function setTF(btn){
+  currentTF=btn.dataset.tf;
+  document.querySelectorAll('.tf-btn').forEach(b=>b.classList.toggle('on',b===btn));
+  loadData();
+}
+
+function filterPairs(q){
+  const v=q.toUpperCase();
+  document.querySelectorAll('.pair-item').forEach(el=>{
+    el.style.display=el.dataset.pair.includes(v)?'':'none';
+  });
+}
+
+function renderPairList(){
+  const list=document.getElementById('pair-list');
+  list.innerHTML='';
+  PAIRS.forEach(p=>{
+    const d=document.createElement('div');
+    d.className='pair-item'+(p==='EURUSD'?' on':'');
+    d.dataset.pair=p;
+    d.textContent=p.slice(0,3)+'/'+p.slice(3);
+    d.onclick=()=>selectPair(p);
+    list.appendChild(d);
+  });
+}
+
+/* ── Indicator toggles ── */
+function toggleBB(){
+  showBB=!showBB;
+  bbUp.applyOptions({visible:showBB});
+  bbMid.applyOptions({visible:showBB});
+  bbLo.applyOptions({visible:showBB});
+  document.getElementById('ind-bb').classList.toggle('on',showBB);
+}
+function toggleMA(n){
+  const s={20:ma20s,50:ma50s,200:ma200s}[n];
+  const id={20:'ind-ma20',50:'ind-ma50',200:'ind-ma200'}[n];
+  const v=!s.options().visible;
+  s.applyOptions({visible:v});
+  document.getElementById(id).classList.toggle('on',v);
+}
+function toggleRSI(){
+  showRSI=!showRSI;
+  const el=document.getElementById('rsi-pane');
+  el.style.display=showRSI?'block':'none';
+  document.getElementById('ind-rsi').classList.toggle('on',showRSI);
+  if(showRSI) setTimeout(()=>rsiChart.applyOptions(chartSize(el)),20);
+}
+function toggleMACD(){
+  showMACD=!showMACD;
+  const el=document.getElementById('macd-pane');
+  el.style.display=showMACD?'block':'none';
+  document.getElementById('ind-macd').classList.toggle('on',showMACD);
+  if(showMACD) setTimeout(()=>macdChart.applyOptions(chartSize(el)),20);
+}
+
+/* ── AI Panel ── */
+function toggleAI(){
+  document.getElementById('ai-panel').classList.toggle('open');
+}
+
+function aiResize(el){
+  el.style.height='auto';
+  el.style.height=Math.min(el.scrollHeight,100)+'px';
+}
+function aiKey(e){
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();aiSend();}
+}
+
+function addAIMsg(role,text,streaming){
+  const msgs=document.getElementById('ai-msgs');
+  const d=document.createElement('div');
+  d.className='ai-msg';
+  d.innerHTML='<div class="ai-role">'+(role==='user'?'You':'Agent')+'</div>'
+             +'<div class="ai-bubble'+(role==='user'?' user':'')+'">'
+             +(streaming?'<div class="dots"><span></span><span></span><span></span></div>':
+               (role==='user'?escHtml(text):marked.parse(text)))
+             +'</div>';
+  msgs.appendChild(d);
+  msgs.scrollTop=msgs.scrollHeight;
+  return d.querySelector('.ai-bubble');
+}
+
+function escHtml(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function aiSend(){
+  const input=document.getElementById('ai-input');
+  const raw=input.value.trim();
+  if(!raw||aiBusy) return;
+  if(!sessionId) await initAISession();
+
+  const ctx=`${raw}\n\n[Viewing: ${currentPair} ${currentTF}]`;
+  input.value=''; input.style.height='auto';
+  aiBusy=true;
+  document.getElementById('ai-send').disabled=true;
+
+  addAIMsg('user',raw);
+  const bubble=addAIMsg('agent','',true);
+
+  let text='';
+  try{
+    const resp=await fetch('/api/chat',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({session_id:sessionId,message:ctx}),
+    });
+    const reader=resp.body.getReader(),dec=new TextDecoder();
+    let buf='',started=false;
+    const msgs=document.getElementById('ai-msgs');
+    while(true){
+      const{done,value}=await reader.read();
+      if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      const lines=buf.split('\n');
+      buf=lines.pop();
+      for(const line of lines){
+        if(!line.startsWith('data: ')) continue;
+        try{
+          const ev=JSON.parse(line.slice(6));
+          if(ev.type==='text'){
+            if(!started){bubble.innerHTML='';started=true;}
+            text+=ev.text;
+            bubble.textContent=text;
+            msgs.scrollTop=msgs.scrollHeight;
+          } else if(ev.type==='done'){
+            bubble.innerHTML=marked.parse(text);
+            msgs.scrollTop=msgs.scrollHeight;
+          } else if(ev.type==='error'){
+            bubble.innerHTML='<span style="color:#ef5350">'+escHtml(ev.message)+'</span>';
+          }
+        }catch(_){}
+      }
+    }
+  }catch(e){
+    bubble.innerHTML='<span style="color:#ef5350">Connection error.</span>';
+  }
+  aiBusy=false;
+  document.getElementById('ai-send').disabled=false;
+  document.getElementById('ai-input').focus();
+}
+
+async function initAISession(){
+  try{
+    const r=await fetch('/api/session',{method:'POST'});
+    const d=await r.json();
+    sessionId=d.session_id||null;
+  }catch(e){console.error('Session init failed:',e);}
+}
+
+/* =====================================================================
+   Bootstrap
+===================================================================== */
+window.addEventListener('load',async ()=>{
+  // Load pair list
+  try{
+    const r=await fetch('/api/pairs');
+    const d=await r.json();
+    PAIRS=d.pairs;
+  }catch(_){
+    PAIRS=['EURUSD','USDJPY','GBPUSD','USDCHF','USDCAD','AUDUSD'];
+  }
+  renderPairList();
+
+  // Init charts
+  initMainChart();
+  initRSI();
+  initMACD();
+  syncTimeScales();
+
+  // Add RSI price lines after init
+  rsiSeries.createPriceLine({price:70,color:'#ef5350',lineWidth:1,
+    lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'OB'});
+  rsiSeries.createPriceLine({price:30,color:'#26a69a',lineWidth:1,
+    lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'OS'});
+
+  // Load initial data
+  await loadData();
+
+  // Init AI session in background
+  initAISession();
+});
 </script>
 </body>
 </html>"""
