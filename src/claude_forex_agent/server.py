@@ -295,6 +295,62 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
   padding:8px 14px;cursor:pointer;font-size:13px
 }
 #ai-send:disabled{background:var(--border);cursor:not-allowed}
+
+/* ── Portfolio pane ── */
+#portfolio-pane{
+  border-top:1px solid var(--border);background:var(--surface);flex-shrink:0
+}
+.port-hdr{
+  display:flex;align-items:center;gap:10px;padding:7px 12px;
+  border-bottom:1px solid var(--border);flex-wrap:wrap
+}
+.port-bal{font-size:13px;font-weight:700;color:#fff;white-space:nowrap}
+#trade-sz{
+  background:var(--panel);border:1px solid var(--border);color:var(--text);
+  padding:3px 7px;border-radius:5px;width:80px;font-size:12px;outline:none
+}
+.btn-long,.btn-short{
+  border:none;padding:4px 12px;border-radius:5px;
+  cursor:pointer;font-size:12px;font-weight:600
+}
+.btn-long{background:#26a69a;color:#fff}
+.btn-long:hover{background:#1f8e84}
+.btn-short{background:#ef5350;color:#fff}
+.btn-short:hover{background:#d32f2f}
+.btn-rst{
+  background:var(--panel);border:1px solid var(--border);
+  color:var(--muted);padding:4px 10px;border-radius:5px;cursor:pointer;font-size:11px
+}
+.btn-rst:hover{color:var(--text)}
+#pnl-total{margin-left:auto;font-size:12px;font-weight:700}
+.port-table{width:100%;border-collapse:collapse;font-size:12px}
+.port-table th{
+  color:var(--muted);font-weight:500;padding:4px 10px;text-align:left;
+  border-bottom:1px solid var(--border);background:var(--panel)
+}
+.port-table td{padding:4px 10px;border-bottom:1px solid rgba(255,255,255,.04)}
+.port-table tr:last-child td{border-bottom:none}
+.port-wrap{max-height:130px;overflow-y:auto}
+.port-empty{
+  color:var(--muted);font-size:12px;padding:12px;text-align:center
+}
+.btn-close-pos{
+  background:#3d1a1a;border:1px solid #7f1d1d;color:#f87171;
+  padding:2px 7px;border-radius:4px;cursor:pointer;font-size:11px
+}
+#refresh-cd{
+  color:var(--muted);font-size:11px;white-space:nowrap;padding:0 6px
+}
+/* ── Toast ── */
+.toast{
+  position:fixed;top:56px;right:16px;z-index:1000;background:#ffd600;
+  color:#000;padding:9px 16px;border-radius:8px;font-weight:600;
+  font-size:13px;box-shadow:0 4px 14px rgba(0,0,0,.4);
+  animation:toastIn .2s ease
+}
+@keyframes toastIn{
+  from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}
+}
 </style>
 </head>
 <body>
@@ -334,6 +390,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
   <button class="tool-btn" onclick="clearDrawings()" title="Clear drawings">&#x2715;</button>
   <span id="fib-hint">Click 2nd point</span>
 
+  <div class="sep"></div>
+  <button class="ind-btn" id="btn-port"
+    onclick="togglePortfolio()">&#x1F4BC; Portfolio</button>
+  <button class="ind-btn"
+    onclick="showAlertDialog()">&#x1F514; Alerte</button>
+  <span id="refresh-cd"></span>
   <button id="ai-toggle" onclick="toggleAI()">&#x1F916; AI Analyst</button>
 </div>
 
@@ -359,6 +421,35 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
     <div id="main-chart"></div>
     <div id="rsi-pane"></div>
     <div id="macd-pane"></div>
+    <div id="portfolio-pane" style="display:none">
+      <div class="port-hdr">
+        <span class="port-bal">
+          Solde: <span id="bal-disp">$10,000.00</span>
+        </span>
+        <input id="trade-sz" type="number" value="1000"
+          min="100" step="100" placeholder="USD">
+        <button class="btn-long"
+          onclick="openPos('long')">&#x25B2; Long</button>
+        <button class="btn-short"
+          onclick="openPos('short')">&#x25BC; Short</button>
+        <span id="pnl-total"></span>
+        <button class="btn-rst"
+          onclick="resetPort()">Reset $10k</button>
+      </div>
+      <div class="port-wrap">
+        <table class="port-table">
+          <thead><tr>
+            <th>Paire</th><th>Direction</th><th>USD</th>
+            <th>Entr&#233;e</th><th>Actuel</th><th>P&amp;L</th><th></th>
+          </tr></thead>
+          <tbody id="port-body">
+            <tr><td colspan="7" class="port-empty">
+              Aucune position ouverte.
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
     <div id="loading"><div class="spinner"></div></div>
   </div>
 
@@ -711,7 +802,13 @@ async function loadData(){
     candleSeries.setData(candles);
     updateIndicators();
     mainChart.timeScale().fitContent();
-    if(candles.length) updateInfoBar(candles[candles.length-1]);
+    if(candles.length){
+      updateInfoBar(candles[candles.length-1]);
+      checkAlerts(candles[candles.length-1].close);
+      renderPortfolio();
+      renderAlertLines();
+      startAutoRefresh();
+    }
     document.getElementById('loading').style.display='none';
     return;
   }
@@ -737,7 +834,13 @@ async function loadData(){
     candleSeries.setData(candles);
     updateIndicators();
     mainChart.timeScale().fitContent();
-    if(candles.length) updateInfoBar(candles[candles.length-1]);
+    if(candles.length){
+      updateInfoBar(candles[candles.length-1]);
+      checkAlerts(candles[candles.length-1].close);
+      renderPortfolio();
+      renderAlertLines();
+      startAutoRefresh();
+    }
   }catch(e){
     showError('⚠ '+e.message);
   }
@@ -923,6 +1026,194 @@ async function initAISession(){
     const d=await r.json();
     sessionId=d.session_id||null;
   }catch(e){console.error('Session init failed:',e);}
+}
+
+/* =====================================================================
+   Toast
+===================================================================== */
+function toast(msg){
+  const t=document.createElement('div');
+  t.className='toast';t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(),4000);
+}
+
+/* =====================================================================
+   Auto-refresh
+===================================================================== */
+let rfTimer=null,rfCount=0;
+const RF_SEC={'1m':60,'5m':300,'15m':900,'30m':1800,'1h':3600,'1D':86400};
+
+function startAutoRefresh(){
+  if(rfTimer) clearInterval(rfTimer);
+  rfCount=RF_SEC[currentTF]||300;
+  updRF();
+  rfTimer=setInterval(()=>{
+    rfCount--;updRF();
+    if(rfCount<=0){
+      localStorage.removeItem(`fx_${currentPair}_${currentTF}`);
+      loadData();
+    }
+  },1000);
+}
+
+function updRF(){
+  const m=Math.floor(rfCount/60),s=rfCount%60;
+  document.getElementById('refresh-cd').textContent=
+    '⟳ '+m+':'+(s<10?'0':'')+s;
+}
+
+/* =====================================================================
+   Price Alerts
+===================================================================== */
+let priceAlerts=JSON.parse(localStorage.getItem('fx_alerts')||'[]');
+let alertLines=[];
+
+function saveAlerts(){
+  localStorage.setItem('fx_alerts',JSON.stringify(priceAlerts));
+}
+
+function showAlertDialog(){
+  const last=candles.length?candles[candles.length-1].close:0;
+  const pp=currentPair.slice(0,3)+'/'+currentPair.slice(3);
+  const val=prompt('🔔 Alerte '+pp+
+    '\nPrix actuel: '+fmt(last)+'\nPrix cible:',fmt(last));
+  if(!val) return;
+  const p=parseFloat(val);if(isNaN(p)) return;
+  const dir=p>=last?'above':'below';
+  priceAlerts.push({
+    id:Date.now(),pair:currentPair,price:p,direction:dir,active:true
+  });
+  saveAlerts();renderAlertLines();
+  toast('🔔 Alerte: '+pp+' '+(dir==='above'?'≥':'≤')+' '+fmt(p));
+}
+
+function renderAlertLines(){
+  alertLines.forEach(l=>{try{candleSeries.removePriceLine(l);}catch(_){}});
+  alertLines=[];
+  priceAlerts.filter(a=>a.pair===currentPair&&a.active).forEach(a=>{
+    alertLines.push(candleSeries.createPriceLine({
+      price:a.price,color:'#ffd600',lineWidth:1,
+      lineStyle:LightweightCharts.LineStyle.LargeDashed,
+      axisLabelVisible:true,title:'🔔 '+fmt(a.price),
+    }));
+  });
+}
+
+function checkAlerts(price){
+  let changed=false;
+  priceAlerts.forEach(a=>{
+    if(!a.active||a.pair!==currentPair) return;
+    const hit=(a.direction==='above'&&price>=a.price)||
+              (a.direction==='below'&&price<=a.price);
+    if(!hit) return;
+    a.active=false;changed=true;
+    const pp=a.pair.slice(0,3)+'/'+a.pair.slice(3);
+    const sym=a.direction==='above'?'≥':'≤';
+    const msg='🔔 '+pp+' '+sym+' '+fmt(a.price)+' — Actuel: '+fmt(price);
+    toast(msg);
+    if(typeof Notification!=='undefined'&&Notification.permission==='granted')
+      new Notification('ForexAI',{body:msg});
+  });
+  if(changed){saveAlerts();renderAlertLines();}
+}
+
+async function requestNotif(){
+  if(typeof Notification!=='undefined'&&Notification.permission==='default')
+    await Notification.requestPermission();
+}
+
+/* =====================================================================
+   Paper Trading Portfolio
+===================================================================== */
+let port=JSON.parse(localStorage.getItem('fx_port')||
+  '{"balance":10000,"positions":[],"history":[]}');
+
+function savePort(){
+  localStorage.setItem('fx_port',JSON.stringify(port));
+}
+
+function togglePortfolio(){
+  const el=document.getElementById('portfolio-pane');
+  const open=el.style.display==='none'||!el.style.display;
+  el.style.display=open?'block':'none';
+  document.getElementById('btn-port').classList.toggle('on',open);
+  if(open) renderPortfolio();
+}
+
+function openPos(dir){
+  const last=candles.length?candles[candles.length-1].close:null;
+  if(!last){toast('⚠ Chargez d\'abord le graphique');return;}
+  const sz=parseFloat(document.getElementById('trade-sz').value)||1000;
+  if(sz>port.balance){toast('⚠ Solde insuffisant');return;}
+  port.balance-=sz;
+  port.positions.push({
+    id:Date.now(),pair:currentPair,direction:dir,
+    entryPrice:last,size:sz,openTime:Date.now(),
+  });
+  savePort();renderPortfolio();
+  const pp=currentPair.slice(0,3)+'/'+currentPair.slice(3);
+  toast((dir==='long'?'▲ Long':'▼ Short')+' — '+pp+' @ '+fmt(last));
+}
+
+function closePos(id){
+  const last=candles.length?candles[candles.length-1].close:null;
+  if(!last) return;
+  const i=port.positions.findIndex(p=>p.id===id);
+  if(i<0) return;
+  const p=port.positions[i];
+  const pnl=posPnL(p,last);
+  port.balance+=p.size+pnl;
+  port.history.unshift({...p,closePrice:last,pnl,closeTime:Date.now()});
+  port.positions.splice(i,1);
+  savePort();renderPortfolio();
+  toast('Fermé — P&L: '+(pnl>=0?'+':'')+'$'+pnl.toFixed(2));
+}
+
+function posPnL(p,cur){
+  return((cur-p.entryPrice)/p.entryPrice)*p.size*(p.direction==='long'?1:-1);
+}
+
+function renderPortfolio(){
+  const last=candles.length?candles[candles.length-1].close:null;
+  document.getElementById('bal-disp').textContent=
+    '$'+port.balance.toFixed(2);
+  const totalPnL=port.positions.reduce(
+    (s,p)=>s+(last?posPnL(p,last):0),0
+  );
+  const pe=document.getElementById('pnl-total');
+  pe.textContent='P&L: '+(totalPnL>=0?'+':'')+'$'+totalPnL.toFixed(2);
+  pe.style.color=totalPnL>=0?'#26a69a':'#ef5350';
+  const tbody=document.getElementById('port-body');
+  if(!port.positions.length){
+    tbody.innerHTML=
+      '<tr><td colspan="7" class="port-empty">'+
+      'Aucune position ouverte.</td></tr>';
+    return;
+  }
+  tbody.innerHTML=port.positions.map(p=>{
+    const pnl=last?posPnL(p,last):0;
+    const pr=pnl>=0?'#26a69a':'#ef5350';
+    const pp=p.pair.slice(0,3)+'/'+p.pair.slice(3);
+    const dclr=p.direction==='long'?'#26a69a':'#ef5350';
+    const dlbl=p.direction==='long'?'&#x25B2; Long':'&#x25BC; Short';
+    return '<tr><td>'+pp+'</td>'+
+      '<td style="color:'+dclr+'">'+dlbl+'</td>'+
+      '<td>$'+p.size.toLocaleString()+'</td>'+
+      '<td>'+fmt(p.entryPrice)+'</td>'+
+      '<td>'+(last?fmt(last):'—')+'</td>'+
+      '<td style="color:'+pr+';font-weight:600">'+
+      (pnl>=0?'+':'')+'$'+pnl.toFixed(2)+'</td>'+
+      '<td><button class="btn-close-pos" onclick="closePos('+p.id+
+      ')">&#x2715;</button></td></tr>';
+  }).join('');
+}
+
+function resetPort(){
+  if(!confirm('Réinitialiser le portfolio à $10,000 ?')) return;
+  port={balance:10000,positions:[],history:[]};
+  savePort();renderPortfolio();
+  toast('Portfolio réinitialisé: $10,000');
 }
 
 /* =====================================================================
