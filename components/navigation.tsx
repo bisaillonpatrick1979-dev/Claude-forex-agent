@@ -9,6 +9,7 @@ const LIENS = [
   { href: '/reunion', label: 'Salle de réunion', icone: '🤝' },
   { href: '/historique', label: 'Historique', icone: '📋' },
   { href: '/marches', label: 'Marchés', icone: '📈' },
+  { href: '/memoire', label: 'Mémoire IA', icone: '🧠' },
   { href: '/reglages', label: 'Réglages', icone: '⚙️' },
 ];
 

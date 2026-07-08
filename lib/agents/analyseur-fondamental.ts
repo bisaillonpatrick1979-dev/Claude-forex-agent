@@ -2,6 +2,7 @@
 import type { RequeteIA, ReponseIA, Cotation } from '@/types';
 import { obtenirFournisseur } from '@/lib/ia/fournisseurs/registre';
 import { obtenirConfigAgent } from '@/lib/supabase/services/config-agents';
+import { formaterDonneesMarche, type DonneesMarche } from '@/lib/donnees/sources-marche';
 import { PROMPTS_SYSTEME } from './prompts';
 
 export interface AnalyseFondamentale {
@@ -15,9 +16,16 @@ export async function analyserFondamentalement(params: {
   symbole: string;
   marche: string;
   cotation: Cotation;
+  donneesMarche?: DonneesMarche;
+  leconsPrecedentes?: string;
 }): Promise<{ analyse: AnalyseFondamentale; reponse: ReponseIA }> {
   const config = await obtenirConfigAgent('analyseur_fondamental');
   const fournisseur = obtenirFournisseur(config?.fournisseur ?? 'mock');
+
+  // Section données temps réel (si disponibles)
+  const sectionDonneesTempsReel = params.donneesMarche
+    ? `\n\n${formaterDonneesMarche(params.donneesMarche)}`
+    : '';
 
   const prompt = `Analyse fondamentale pour ${params.symbole} (${params.marche})
 
@@ -25,14 +33,17 @@ Prix actuel : ${params.cotation.prix.toFixed(4)}
 Variation journalière : ${params.cotation.variationPct.toFixed(2)}%
 Volume : ${params.cotation.volumeJour?.toLocaleString('fr-CA') ?? 'N/A'}
 Haut 24h : ${params.cotation.high24h?.toFixed(4) ?? 'N/A'}
-Bas 24h : ${params.cotation.low24h?.toFixed(4) ?? 'N/A'}
+Bas 24h : ${params.cotation.low24h?.toFixed(4) ?? 'N/A'}${sectionDonneesTempsReel}
 
-Analyse le contexte macroéconomique et donne un biais directionnel (HAUSSIER, BAISSIER ou NEUTRE).
-Identifie les facteurs clés qui influencent cet instrument.`;
+Analyse le contexte macroéconomique en tenant compte des actualités et indicateurs ci-dessus.
+Donne un biais directionnel (HAUSSIER, BAISSIER ou NEUTRE) et identifie les facteurs clés.`;
+
+  // Système prompt enrichi des leçons passées
+  const systemPrompt = PROMPTS_SYSTEME.analyseur_fondamental + (params.leconsPrecedentes ?? '');
 
   const requete: RequeteIA = {
     agent: 'analyseur_fondamental',
-    systemPrompt: PROMPTS_SYSTEME.analyseur_fondamental,
+    systemPrompt,
     prompt,
     contexte: {
       symbole: params.symbole,

@@ -17,6 +17,7 @@ export interface AnalyseTechnique {
 }
 
 export async function analyserTechniquement(params: {
+  leconsPrecedentes?: string;
   symbole: string;
   prixActuel: number;
   indicateurs: IndicateursTechniques;
@@ -44,9 +45,11 @@ ${dernieresBougies}
 Effectue une analyse technique complète et donne une recommandation claire (ACHAT, VENTE ou NEUTRE).
 Inclus les niveaux clés : support, résistance, stop-loss suggéré et objectif de prix.`;
 
+  const systemPrompt = PROMPTS_SYSTEME.analyseur_technique + (params.leconsPrecedentes ?? '');
+
   const requete: RequeteIA = {
     agent: 'analyseur_technique',
-    systemPrompt: PROMPTS_SYSTEME.analyseur_technique,
+    systemPrompt,
     prompt,
     contexte: {
       symbole: params.symbole,

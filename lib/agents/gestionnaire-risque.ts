@@ -26,6 +26,7 @@ export async function evaluerRisque(params: {
   analyseTechnique: AnalyseTechnique;
   symbole: string;
   marche: 'forex' | 'actions' | 'crypto';
+  leconsPrecedentes?: string;
 }): Promise<{ evaluation: EvaluationRisque; reponse: ReponseIA }> {
   const config = await obtenirConfigAgent('gestionnaire_risque');
   const fournisseur = obtenirFournisseur(config?.fournisseur ?? 'mock');
@@ -71,7 +72,7 @@ Valide ou rejette cet ordre selon nos règles de risque strictes.`;
 
   const requete: RequeteIA = {
     agent: 'gestionnaire_risque',
-    systemPrompt: PROMPTS_SYSTEME.gestionnaire_risque,
+    systemPrompt: PROMPTS_SYSTEME.gestionnaire_risque + (params.leconsPrecedentes ?? ''),
     prompt,
     contexte: {
       capital: portefeuille.capitalActuel.toFixed(2),

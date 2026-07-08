@@ -176,3 +176,27 @@ CREATE INDEX IF NOT EXISTS idx_positions_statut ON positions(statut);
 CREATE INDEX IF NOT EXISTS idx_cycles_portefeuille ON cycles_decision(portefeuille_id);
 CREATE INDEX IF NOT EXISTS idx_messages_cycle ON messages_agents(cycle_id);
 CREATE INDEX IF NOT EXISTS idx_journal_portefeuille_date ON journal_performance(portefeuille_id, date);
+
+-- ─── Table : Leçons apprises par les agents ──────────────────────
+-- Mémoire persistante : chaque erreur analysée génère une leçon
+-- réinjectée dans les prompts des cycles suivants
+CREATE TABLE IF NOT EXISTS lecons_agents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  portefeuille_id UUID REFERENCES portefeuilles(id) ON DELETE CASCADE,
+  agent TEXT NOT NULL
+    CHECK (agent IN ('pdg','analyseur_technique','analyseur_fondamental','gestionnaire_risque','trader_executeur')),
+  symbole TEXT,
+  lecon TEXT NOT NULL,                    -- Leçon formulée en 1-2 phrases
+  contexte JSONB,                         -- {direction, prixEntree, prixSortie, pnl, rsi, tendance, ...}
+  type_erreur TEXT,                       -- 'faux_signal', 'timing', 'mauvais_rr', 'news_ignorees', etc.
+  position_id UUID REFERENCES positions(id),
+  cree_le TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE lecons_agents ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Acces complet authentifie" ON lecons_agents
+  FOR ALL USING (true) WITH CHECK (true);
+
+CREATE INDEX IF NOT EXISTS idx_lecons_portefeuille ON lecons_agents(portefeuille_id);
+CREATE INDEX IF NOT EXISTS idx_lecons_agent ON lecons_agents(agent, portefeuille_id);
+CREATE INDEX IF NOT EXISTS idx_lecons_date ON lecons_agents(cree_le DESC);
