@@ -1,0 +1,42 @@
+# Déclenchement automatique des cycles de trading toutes les 15 minutes
+# pendant les heures de marché (lundi-vendredi, 9h30-16h00 EST)
+name: Cycle Trading IA
+
+on:
+  schedule:
+    # Toutes les 15 minutes, lundi-vendredi, 14h30 à 21h00 UTC (9h30-16h00 EST)
+    - cron: '*/15 14-20 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      declenchePar:
+        description: 'Déclencheur du cycle'
+        required: false
+        default: 'manuel'
+
+jobs:
+  cycle:
+    name: Lancer un cycle de trading
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Déclencher le cycle via l'API
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.VERCEL_APP_URL }}/api/cycle")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+
+          echo "Code HTTP : $HTTP_CODE"
+          echo "Réponse : $BODY"
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "Erreur : cycle non exécuté (HTTP $HTTP_CODE)"
+            exit 1
+          fi
+
+          echo "Cycle exécuté avec succès"

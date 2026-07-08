@@ -1,41 +1,28 @@
-import type { Metadata, Viewport } from 'next';
+import type { Metadata } from 'next';
 import './globals.css';
-import { Toaster } from 'react-hot-toast';
+import Navigation from '@/components/navigation';
 
 export const metadata: Metadata = {
-  title: 'ForexAgent Pro — Trading IA Multi-Agents',
-  description: 'Plateforme de trading Forex propulsée par des agents IA spécialisés',
+  title: 'TradingLab IA — Simulation de trading par agents IA',
+  description: 'Société de trading fictive pilotée par des agents IA — argent fictif uniquement',
   icons: { icon: '/favicon.ico' },
-};
-
-export const viewport: Viewport = {
-  width: 'device-width',
-  initialScale: 1,
-  themeColor: '#0B0E11',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fr" className="dark">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      </head>
-      <body className="bg-[#0B0E11] text-[#D1D4DC] overflow-hidden h-screen">
-        {children}
-        <Toaster
-          position="bottom-right"
-          toastOptions={{
-            style: {
-              background: '#1C2230',
-              color: '#D1D4DC',
-              border: '1px solid #2A2E3D',
-              fontSize: '12px',
-            },
-            success: { iconTheme: { primary: '#089981', secondary: '#0B0E11' } },
-            error: { iconTheme: { primary: '#F23645', secondary: '#0B0E11' } },
-          }}
-        />
+    <html lang="fr">
+      <body style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+        {/* Bannière obligatoire — argent fictif */}
+        <div className="bandeau-simulation">
+          Simulation — Argent fictif — Aucun trade réel n&apos;est jamais exécuté
+        </div>
+
+        <div style={{ display: 'flex', flex: 1 }}>
+          <Navigation />
+          <main style={{ flex: 1, overflow: 'auto', padding: '24px' }}>
+            {children}
+          </main>
+        </div>
       </body>
     </html>
   );

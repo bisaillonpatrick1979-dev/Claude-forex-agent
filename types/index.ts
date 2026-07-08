@@ -1,280 +1,182 @@
-// ─── Market Data ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════
+// TYPES GLOBAUX — TradingLab IA
+// ═══════════════════════════════════════════════════════════════════
 
-export interface CandleData {
-  time: number; // Unix timestamp
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume?: number;
+// ─── Marchés ─────────────────────────────────────────────────────
+
+export type TypeMarche = 'forex' | 'actions' | 'crypto';
+export type DirectionTrade = 'achat' | 'vente';
+export type StatutPosition = 'ouverte' | 'fermee' | 'annulee';
+export type StatutPortefeuille = 'actif' | 'pause' | 'suspendu';
+export type NomAgent = 'pdg' | 'analyseur_technique' | 'analyseur_fondamental' | 'gestionnaire_risque' | 'trader_executeur';
+export type NomFournisseur = 'mock' | 'anthropic' | 'gemini' | 'openai';
+export type ModeDeclenchement = 'manuel' | 'cron' | 'automatique';
+export type DecisionFinale = 'achat' | 'vente' | 'attente';
+
+// ─── Cotations ────────────────────────────────────────────────────
+
+export interface Cotation {
+  symbole: string;
+  nom: string;
+  marche: TypeMarche;
+  prix: number;
+  variation: number;
+  variationPct: number;
+  volumeJour?: number;
+  high24h?: number;
+  low24h?: number;
+  derniereMaj: string;
 }
 
-export interface QuoteData {
-  symbol: string;
-  bid: number;
-  ask: number;
-  price: number;
-  change: number;
-  changePct: number;
-  high: number;
-  low: number;
-  timestamp: number;
+export interface DonneesHistoriques {
+  date: string;
+  ouverture: number;
+  haut: number;
+  bas: number;
+  cloture: number;
+  volume: number;
 }
 
-export interface NewsItem {
-  title: string;
-  summary: string;
-  url: string;
-  source: string;
-  sentiment: 'Bullish' | 'Bearish' | 'Neutral' | 'Somewhat-Bullish' | 'Somewhat-Bearish';
-  sentimentScore: number;
-  publishedAt: string;
-  tickers: string[];
+export interface IndicateursTechniques {
+  rsi14?: number;
+  mm20?: number;
+  mm50?: number;
+  mm200?: number;
+  macdLigne?: number;
+  macdSignal?: number;
+  macdHistogramme?: number;
+  bbHaut?: number;
+  bbMilieu?: number;
+  bbBas?: number;
+  tendance?: 'haussiere' | 'baissiere' | 'neutre' | 'laterale';
+  forceSignal?: number;
 }
 
-// ─── Indicators ───────────────────────────────────────────────────────────────
+// ─── Portfolio & Positions ────────────────────────────────────────
 
-export interface RSIData {
-  time: number;
-  value: number;
+export interface Portefeuille {
+  id: string;
+  nom: string;
+  devise: string;
+  profil: string;
+  capitalInitial: number;
+  capitalActuel: number;
+  statut: StatutPortefeuille;
+  cree_le: string;
+  mis_a_jour_le: string;
 }
-
-export interface MACDData {
-  time: number;
-  macd: number;
-  signal: number;
-  histogram: number;
-}
-
-export interface BollingerData {
-  time: number;
-  upper: number;
-  middle: number;
-  lower: number;
-}
-
-export interface FibonacciLevel {
-  level: number; // e.g. 0.236, 0.382, 0.5, 0.618
-  price: number;
-  label: string;
-}
-
-export interface FibonacciRetracement {
-  swingHigh: number;
-  swingLow: number;
-  levels: FibonacciLevel[];
-  direction: 'up' | 'down';
-}
-
-export interface EMAData {
-  time: number;
-  value: number;
-}
-
-// ─── Trading ──────────────────────────────────────────────────────────────────
-
-export type TradeDirection = 'BUY' | 'SELL';
-export type OrderStatus = 'OPEN' | 'CLOSED' | 'CANCELLED' | 'PENDING';
-export type TimeInForce = 'GTC' | 'IOC' | 'FOK';
 
 export interface Position {
   id: string;
-  symbol: string;
-  direction: TradeDirection;
-  entryPrice: number;
-  currentPrice: number;
-  size: number; // in units / lots
+  portefeuilleId: string;
+  symbole: string;
+  marche: TypeMarche;
+  direction: DirectionTrade;
+  taille: number;
+  prixEntree: number;
   stopLoss?: number;
   takeProfit?: number;
-  openedAt: number;
-  pnl: number;
-  pnlPct: number;
-  agentId?: string; // which agent opened this
+  prixSortie?: number;
+  pnl?: number;
+  statut: StatutPosition;
+  ouvert_le: string;
+  ferme_le?: string;
+  cycleId?: string;
+  raisonnement?: string;
 }
 
-export interface ClosedTrade {
+export interface OrdreExecution {
+  symbole: string;
+  marche: TypeMarche;
+  direction: DirectionTrade;
+  taille: number;
+  prixEntree: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  raisonnement: string;
+}
+
+// ─── IA & Fournisseurs ────────────────────────────────────────────
+
+export interface MessageIA {
+  role: 'user' | 'assistant';
+  contenu: string;
+}
+
+export interface RequeteIA {
+  agent: NomAgent;
+  systemPrompt?: string;
+  prompt: string;
+  historique?: MessageIA[];
+  contexte?: Record<string, string | number>;
+}
+
+export interface ReponseIA {
+  contenu: string;
+  tokensEntree?: number;
+  tokensSortie?: number;
+  modele: string;
+}
+
+export interface FournisseurIA {
+  nom: NomFournisseur;
+  modeleDefaut: string;
+  modelesDisponibles: string[];
+  generer(requete: RequeteIA, modele?: string): Promise<ReponseIA>;
+  testerConnexion(modele?: string): Promise<{ succes: boolean; message: string }>;
+}
+
+export interface ConfigAgent {
   id: string;
-  symbol: string;
-  direction: TradeDirection;
-  entryPrice: number;
-  exitPrice: number;
-  size: number;
-  openedAt: number;
-  closedAt: number;
-  pnl: number;
-  pnlPct: number;
-  agentId?: string;
-  reason?: string;
+  agent: NomAgent;
+  fournisseur: NomFournisseur;
+  modele: string;
+  actif: boolean;
+  mis_a_jour_le: string;
 }
 
-export interface PortfolioStats {
-  balance: number;
-  equity: number;
-  unrealizedPnl: number;
-  realizedPnl: number;
-  totalTrades: number;
-  winRate: number;
-  maxDrawdown: number;
-  sharpeRatio: number;
-}
+// ─── Cycles de décision ───────────────────────────────────────────
 
-// ─── Agents ───────────────────────────────────────────────────────────────────
-
-export type AgentType =
-  | 'technical_analyst'
-  | 'sentiment_analyst'
-  | 'risk_manager'
-  | 'macro_analyst'
-  | 'coordinator';
-
-export type AgentStatus = 'idle' | 'analyzing' | 'waiting' | 'active' | 'disabled';
-
-export interface Agent {
+export interface MessageAgentDB {
   id: string;
-  type: AgentType;
-  name: string;
-  description: string;
-  status: AgentStatus;
-  enabled: boolean;
-  lastAnalysis?: string;
-  confidence?: number;
-  signal?: 'BUY' | 'SELL' | 'HOLD';
-  model?: string;
+  cycleId: string;
+  agent: NomAgent;
+  roleAgent: string;
+  contenu: string;
+  fournisseur?: NomFournisseur;
+  modele?: string;
+  cree_le: string;
 }
 
-export interface AgentMessage {
+export interface CycleDecision {
   id: string;
-  agentId: string;
-  agentName: string;
-  agentType: AgentType;
-  content: string;
-  timestamp: number;
-  type: 'analysis' | 'signal' | 'risk' | 'decision' | 'info' | 'debate';
+  portefeuilleId: string;
+  declenchePar: ModeDeclenchement;
+  decisionFinale?: DecisionFinale;
+  execute_le: string;
+  messages?: MessageAgentDB[];
+  nbTradesExecutes?: number;
 }
 
-// These interfaces use snake_case keys to match AI JSON output directly
-export interface TechnicalAnalysis {
-  trend: 'bullish' | 'bearish' | 'neutral' | 'ranging';
-  strength: number;
-  rsi_interpretation?: string;
-  macd_signal?: 'bullish' | 'bearish' | 'neutral';
-  bollinger_position?: string;
-  fibonacci_nearest?: string;
-  key_levels?: string[];
-  patterns: string[];
-  signal: 'BUY' | 'SELL' | 'HOLD';
-  confidence: number;
-  reasoning: string;
-  entry?: number;
-  stop_loss?: number;
-  take_profit?: number;
-}
+// ─── Instruments suivis ───────────────────────────────────────────
 
-export interface SentimentAnalysis {
-  overall_sentiment: 'Bullish' | 'Bearish' | 'Neutral';
-  sentiment_score: number;
-  key_themes?: string[];
-  risk_environment?: string;
-  notable_news?: string;
-  fundamental_bias?: string;
-  signal: 'BUY' | 'SELL' | 'HOLD';
-  confidence: number;
-  reasoning: string;
-}
+export const INSTRUMENTS: { symbole: string; nom: string; marche: TypeMarche }[] = [
+  { symbole: 'EURUSD=X', nom: 'EUR/USD', marche: 'forex' },
+  { symbole: 'GBPUSD=X', nom: 'GBP/USD', marche: 'forex' },
+  { symbole: 'USDCAD=X', nom: 'USD/CAD', marche: 'forex' },
+  { symbole: 'QQQ', nom: 'Nasdaq ETF', marche: 'actions' },
+  { symbole: 'AAPL', nom: 'Apple', marche: 'actions' },
+  { symbole: 'MSFT', nom: 'Microsoft', marche: 'actions' },
+  { symbole: 'NVDA', nom: 'NVIDIA', marche: 'actions' },
+  { symbole: 'TSLA', nom: 'Tesla', marche: 'actions' },
+  { symbole: 'BTC-USD', nom: 'Bitcoin', marche: 'crypto' },
+  { symbole: 'ETH-USD', nom: 'Ethereum', marche: 'crypto' },
+];
 
-export interface RiskAnalysis {
-  approved: boolean;
-  risk_per_trade?: number;
-  recommended_size: number;
-  stop_loss: number;
-  take_profit: number;
-  risk_reward_ratio: number;
-  margin_required?: number;
-  max_acceptable_loss?: number;
-  risk_grade?: 'low' | 'medium' | 'high' | 'extreme';
-  reasoning: string;
-}
-
-export interface CoordinatorDecision {
-  action: 'BUY' | 'SELL' | 'HOLD';
-  symbol: string;
-  entry: number;
-  stop_loss: number;
-  take_profit: number;
-  size: number;
-  confidence: number;
-  reasoning?: string;
-  trade_rationale?: string;
-  technical_weight?: number;
-  sentiment_weight?: number;
-  agent_consensus?: string;
-  key_catalysts?: string[];
-  risk_reward?: number;
-  expected_duration?: string;
-  invalidation?: string;
-}
-
-export interface AnalysisResult {
-  id: string;
-  symbol: string;
-  timeframe: string;
-  timestamp: number;
-  technical?: TechnicalAnalysis;
-  sentiment?: SentimentAnalysis;
-  risk?: RiskAnalysis;
-  decision?: CoordinatorDecision;
-  messages: AgentMessage[];
-}
-
-// ─── Settings ─────────────────────────────────────────────────────────────────
-
-export type AIProvider = 'anthropic' | 'openai' | 'google';
-
-export type Timeframe =
-  | '1min'
-  | '5min'
-  | '15min'
-  | '30min'
-  | '60min'
-  | 'daily'
-  | 'weekly'
-  | 'monthly';
-
-export interface AppSettings {
-  aiProvider: AIProvider;
-  aiModel: string;
-  apiKeys: {
-    alphavantage: string;
-    anthropic: string;
-    openai: string;
-    google: string;
-  };
-  initialCapital: number;
-  riskPerTrade: number; // percentage 1-5%
-  autoTrade: boolean;
-  analysisInterval: number; // seconds
-  defaultSymbol: string;
-  defaultTimeframe: Timeframe;
-}
-
-// ─── Chart ────────────────────────────────────────────────────────────────────
-
-export type ChartIndicator = 'rsi' | 'macd' | 'bollinger' | 'ema20' | 'ema50' | 'volume';
-
-export interface ChartMarker {
-  time: number;
-  position: 'aboveBar' | 'belowBar';
-  color: string;
-  shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square';
-  text: string;
-  size?: number;
-}
-
-export interface ForexPair {
-  symbol: string;
-  from: string;
-  to: string;
-  displayName: string;
-  pip: number;
-  category: 'major' | 'minor' | 'exotic';
-}
+export const NOMS_AGENTS: Record<NomAgent, string> = {
+  pdg: 'PDG / Orchestrateur',
+  analyseur_technique: 'Analyste Technique',
+  analyseur_fondamental: 'Analyste Fondamental',
+  gestionnaire_risque: 'Gestionnaire de Risque',
+  trader_executeur: 'Trader Exécuteur',
+};
